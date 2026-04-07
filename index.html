@@ -271,6 +271,46 @@
       font-weight: 700;
     }
 
+    .hard-egg {
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-style: italic;
+      margin: 0.85rem 0 0;
+      opacity: 0.72;
+      letter-spacing: 0.02em;
+    }
+
+    .hard-egg[hidden] {
+      display: none !important;
+    }
+
+    .combo-line {
+      text-align: center;
+      margin: 0.65rem 0 0;
+      font-family: "Bebas Neue", sans-serif;
+      font-size: 1.35rem;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      min-height: 1.4em;
+      transition: color 0.2s, transform 0.2s;
+    }
+
+    .combo-line.is-hot {
+      color: #c9a227;
+      text-shadow: 0 0 24px rgba(201, 162, 39, 0.35);
+    }
+
+    .combo-line.is-ultra {
+      color: #7eb8ff;
+      text-shadow: 0 0 28px rgba(126, 184, 255, 0.35);
+    }
+
+    .combo-line.is-monster {
+      color: #e070ff;
+      text-shadow: 0 0 32px rgba(224, 112, 255, 0.4);
+    }
+
     .result-toast {
       position: fixed;
       left: 50%;
@@ -312,6 +352,30 @@
       background: rgba(28, 12, 14, 0.94);
       border: 1px solid var(--accent-red);
       box-shadow: 0 0 50px var(--accent-red-glow);
+    }
+
+    .result-toast.amazing {
+      color: #f0d060;
+      background: rgba(28, 24, 8, 0.95);
+      border: 1px solid #a08030;
+      box-shadow: 0 0 56px rgba(240, 208, 96, 0.35);
+      font-size: 2.15rem;
+    }
+
+    .result-toast.ultra {
+      color: #a8d8ff;
+      background: rgba(10, 18, 32, 0.95);
+      border: 1px solid #4a7ab8;
+      box-shadow: 0 0 56px rgba(126, 184, 255, 0.35);
+      font-size: 2.15rem;
+    }
+
+    .result-toast.monster {
+      color: #e8b0ff;
+      background: rgba(22, 10, 28, 0.95);
+      border: 1px solid #8a4aa0;
+      box-shadow: 0 0 64px rgba(224, 112, 255, 0.4);
+      font-size: 2.25rem;
     }
 
     @media (max-width: 380px) {
@@ -367,6 +431,8 @@
       <div>Good <span id="statGood">0</span></div>
       <div>Miss <span id="statMiss">0</span></div>
     </div>
+    <p id="comboLine" class="combo-line" aria-live="polite">—</p>
+    <p id="hardEasterEgg" class="hard-egg" hidden>Stacy can't handle this mode :)</p>
   </div>
 
   <div id="resultToast" class="result-toast" role="status" aria-live="polite"></div>
@@ -374,15 +440,13 @@
   <script>
     (function () {
       const DIFFICULTY = {
-        easy:   { label: "Easy",   radPerSec: Math.PI * 1.15 },
-        medium: { label: "Medium", radPerSec: Math.PI * 2.0 },
-        hard:   { label: "Hard",   radPerSec: Math.PI * 3.25 },
+        easy:   { label: "Easy",   radPerSec: Math.PI * 1.15, minApproach: 1 },
+        medium: { label: "Medium", radPerSec: Math.PI * 1.9, minApproach: 2 },
+        hard:   { label: "Hard",   radPerSec: Math.PI * 3, minApproach: 3 },
       };
 
       const GOOD_ARC = 0.52;
       const GREAT_ARC = 0.12;
-      /** Min radians along spin before zone entry — avoids instant/unfair spawns */
-      const MIN_APPROACH_TO_ZONE = 1.08;
 
       const menuScreen = document.getElementById("menuScreen");
       const gameScreen = document.getElementById("gameScreen");
@@ -395,8 +459,11 @@
       const statMiss = document.getElementById("statMiss");
       const toast = document.getElementById("resultToast");
       const spinLabel = document.getElementById("spinLabel");
+      const hardEasterEgg = document.getElementById("hardEasterEgg");
+      const comboLine = document.getElementById("comboLine");
 
       let currentDiff = "medium";
+      let combo = 0;
       /** +1 = angle increases (CW on screen), -1 = CCW */
       let spinDir = 1;
       let needleAngle = 0;
@@ -486,15 +553,20 @@
         return spinDir === 1 ? cwDistanceToZoneEntry(angle) : ccwDistanceToZoneEntry(angle);
       }
 
+      function getMinApproach() {
+        return DIFFICULTY[currentDiff].minApproach;
+      }
+
       function pickFairNeedleAngle() {
+        const minA = getMinApproach();
         for (let i = 0; i < 100; i++) {
           const cand = Math.random() * Math.PI * 2;
           if (isNeedleInsideGoodZone(cand)) continue;
-          if (distanceAlongSpinToZoneEntry(cand) < MIN_APPROACH_TO_ZONE) continue;
+          if (distanceAlongSpinToZoneEntry(cand) < minA) continue;
           return cand;
         }
         if (spinDir === 1) return normalizeAngle(goodEnd + 0.28);
-        return normalizeAngle(goodEnd + MIN_APPROACH_TO_ZONE + 0.28);
+        return normalizeAngle(goodEnd + minA + 0.28);
       }
 
       function resizeCanvas() {
@@ -584,27 +656,58 @@
         ctx.restore();
       }
 
-      function showToast(text, kind) {
+      function showToast(text, kind, durationMs) {
+        var ms = durationMs != null ? durationMs : 650;
         toast.textContent = text;
         toast.className = "result-toast " + kind + " show";
         clearTimeout(toastTimer);
         toastTimer = setTimeout(function () {
           toast.classList.remove("show");
-        }, 650);
+        }, ms);
+      }
+
+      function comboHudText(n) {
+        if (n <= 0) return "—";
+        if (n < 5) return "Combo x" + n;
+        if (n < 10) return "Amazing x" + n;
+        if (n < 15) return "Ultra x" + n;
+        return "Monster x" + n;
+      }
+
+      function updateComboHud() {
+        if (!comboLine) return;
+        comboLine.textContent = comboHudText(combo);
+        comboLine.classList.remove("is-hot", "is-ultra", "is-monster");
+        if (combo >= 15) comboLine.classList.add("is-monster");
+        else if (combo >= 10) comboLine.classList.add("is-ultra");
+        else if (combo >= 5) comboLine.classList.add("is-hot");
       }
 
       function registerResult(kind) {
         awaitingInput = false;
+        if (kind === "miss") combo = 0;
+        else combo++;
         stats[kind]++;
         statGreat.textContent = String(stats.great);
         statGood.textContent = String(stats.good);
         statMiss.textContent = String(stats.miss);
-        if (kind === "great") showToast("Great!", "great");
-        else if (kind === "good") showToast("Good", "good");
-        else showToast("Miss", "miss");
+        updateComboHud();
+
+        var milestone = kind !== "miss" && (combo === 5 || combo === 10 || combo === 15);
+        if (milestone) {
+          if (combo === 5) showToast("Amazing x5!", "amazing", 1000);
+          else if (combo === 10) showToast("Ultra x10!", "ultra", 1000);
+          else showToast("Monster x15!", "monster", 1100);
+        } else {
+          if (kind === "great") showToast("Great!", "great");
+          else if (kind === "good") showToast("Good", "good");
+          else showToast("Miss", "miss");
+        }
+
         spinDir = -spinDir;
         updateSpinLabel();
-        setTimeout(startRound, kind === "miss" ? 900 : 550);
+        var delay = kind === "miss" ? 900 : milestone ? 800 : 550;
+        setTimeout(startRound, delay);
       }
 
       function tryHit() {
@@ -643,6 +746,9 @@
       function startGame(diff) {
         currentDiff = diff;
         diffLabel.textContent = DIFFICULTY[diff].label;
+        if (hardEasterEgg) hardEasterEgg.hidden = diff !== "hard";
+        combo = 0;
+        updateComboHud();
         stats = { great: 0, good: 0, miss: 0 };
         statGreat.textContent = "0";
         statGood.textContent = "0";
