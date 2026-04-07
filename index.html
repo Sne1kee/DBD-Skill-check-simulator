@@ -226,6 +226,11 @@
       color: var(--accent-gold);
     }
 
+    .badge-diff .spin-badge {
+      color: #a8b8d0;
+      letter-spacing: 0.08em;
+    }
+
     .canvas-wrap {
       position: relative;
       width: min(100%, 340px);
@@ -319,7 +324,7 @@
   <div id="menuScreen" class="screen">
     <header class="menu-header">
       <h1>Skill Check</h1>
-      <p>Hit <kbd>Space</kbd> when the needle enters the white zone.<br />The gold cap at the <strong>end</strong> of the arc is the great check.</p>
+      <p>Hit <kbd>Space</kbd> when the needle enters the white zone.<br />Gold sits at the <strong>far end</strong> of the white arc along the spinner’s direction — it <strong>flips</strong> when rotation reverses.</p>
     </header>
     <p class="difficulty-label">Choose difficulty</p>
     <div class="difficulty-grid">
@@ -351,12 +356,12 @@
   <div id="gameScreen" class="screen" hidden>
     <div class="game-top">
       <button type="button" class="back-btn" id="backBtn">← Menu</button>
-      <div class="badge-diff">Difficulty · <span id="diffLabel">—</span></div>
+      <div class="badge-diff">Difficulty · <span id="diffLabel">—</span> · <span id="spinLabel" class="spin-badge">CW</span></div>
     </div>
     <div class="canvas-wrap">
       <canvas id="skillCanvas" width="340" height="340" aria-label="Skill check gauge"></canvas>
     </div>
-    <p class="prompt">Press <strong>Space</strong> in the zone — gold at the end of the white arc is great.</p>
+    <p class="prompt">Press <strong>Space</strong> in the zone — gold is always the <strong>last</strong> slice you cross before leaving the white arc (side swaps with spin).</p>
     <div class="stats">
       <div>Great <span id="statGreat">0</span></div>
       <div>Good <span id="statGood">0</span></div>
@@ -376,8 +381,8 @@
 
       const GOOD_ARC = 0.52;
       const GREAT_ARC = 0.12;
-      /** Min radians the needle must travel (forward) before hitting zone start — avoids instant/unfair spawns */
-      const MIN_APPROACH_TO_ZONE = 0.62;
+      /** Min radians along spin before zone entry — avoids instant/unfair spawns */
+      const MIN_APPROACH_TO_ZONE = 1.08;
 
       const menuScreen = document.getElementById("menuScreen");
       const gameScreen = document.getElementById("gameScreen");
@@ -389,8 +394,11 @@
       const statGood = document.getElementById("statGood");
       const statMiss = document.getElementById("statMiss");
       const toast = document.getElementById("resultToast");
+      const spinLabel = document.getElementById("spinLabel");
 
       let currentDiff = "medium";
+      /** +1 = angle increases (CW on screen), -1 = CCW */
+      let spinDir = 1;
       let needleAngle = 0;
       let zoneStart = 0;
       let greatStart = 0;
@@ -422,16 +430,34 @@
         const margin = 0.35;
         zoneStart = margin + Math.random() * (Math.PI * 2 - GOOD_ARC - margin * 2);
         goodEnd = zoneStart + GOOD_ARC;
-        greatEnd = goodEnd;
-        greatStart = goodEnd - GREAT_ARC;
+      }
+
+      /** Great slice is the last part of the white arc along current spin: CW → high-angle end, CCW → low-angle end */
+      function applyGreatZoneForSpinDir() {
+        if (spinDir === 1) {
+          greatEnd = goodEnd;
+          greatStart = goodEnd - GREAT_ARC;
+        } else {
+          greatStart = zoneStart;
+          greatEnd = zoneStart + GREAT_ARC;
+        }
+      }
+
+      function updateSpinLabel() {
+        if (!spinLabel) return;
+        spinLabel.textContent = spinDir === 1 ? "CW" : "CCW";
+        spinLabel.setAttribute(
+          "title",
+          spinDir === 1 ? "Needle rotates clockwise" : "Needle rotates counter-clockwise"
+        );
       }
 
       function isNeedleInsideGoodZone(angle) {
         return angleInArc(angle, zoneStart, goodEnd);
       }
 
-      /** Forward travel (radians) along spin direction until zone entry at zoneStart; 0 if already in zone */
-      function forwardDistanceToZoneEntry(angle) {
+      /** Travel with increasing angle until first hitting zoneStart (CW entry) */
+      function cwDistanceToZoneEntry(angle) {
         const n = normalizeAngle(angle);
         const s = normalizeAngle(zoneStart);
         const e = normalizeAngle(goodEnd);
@@ -443,14 +469,32 @@
         return normalizeAngle(s - n);
       }
 
+      /** Travel with decreasing angle until first hitting goodEnd (CCW entry) */
+      function ccwDistanceToZoneEntry(angle) {
+        const n = normalizeAngle(angle);
+        const s = normalizeAngle(zoneStart);
+        const e = normalizeAngle(goodEnd);
+        if (s <= e) {
+          if (n > e) return n - e;
+          if (n < s) return n + (Math.PI * 2 - e);
+          return 0;
+        }
+        return normalizeAngle(n - e);
+      }
+
+      function distanceAlongSpinToZoneEntry(angle) {
+        return spinDir === 1 ? cwDistanceToZoneEntry(angle) : ccwDistanceToZoneEntry(angle);
+      }
+
       function pickFairNeedleAngle() {
         for (let i = 0; i < 100; i++) {
           const cand = Math.random() * Math.PI * 2;
           if (isNeedleInsideGoodZone(cand)) continue;
-          if (forwardDistanceToZoneEntry(cand) < MIN_APPROACH_TO_ZONE) continue;
+          if (distanceAlongSpinToZoneEntry(cand) < MIN_APPROACH_TO_ZONE) continue;
           return cand;
         }
-        return normalizeAngle(goodEnd + 0.2);
+        if (spinDir === 1) return normalizeAngle(goodEnd + 0.28);
+        return normalizeAngle(goodEnd + MIN_APPROACH_TO_ZONE + 0.28);
       }
 
       function resizeCanvas() {
@@ -558,6 +602,8 @@
         if (kind === "great") showToast("Great!", "great");
         else if (kind === "good") showToast("Good", "good");
         else showToast("Miss", "miss");
+        spinDir = -spinDir;
+        updateSpinLabel();
         setTimeout(startRound, kind === "miss" ? 900 : 550);
       }
 
@@ -576,7 +622,7 @@
         lastTs = ts;
         const speed = DIFFICULTY[currentDiff].radPerSec;
         if (awaitingInput) {
-          needleAngle = normalizeAngle(needleAngle + speed * dt);
+          needleAngle = normalizeAngle(needleAngle + spinDir * speed * dt);
           rotationThisRound += speed * dt;
           if (rotationThisRound >= Math.PI * 2) registerResult("miss");
         }
@@ -586,6 +632,7 @@
 
       function startRound() {
         randomZone();
+        applyGreatZoneForSpinDir();
         needleAngle = pickFairNeedleAngle();
         rotationThisRound = 0;
         awaitingInput = true;
@@ -603,6 +650,8 @@
         menuScreen.hidden = true;
         gameScreen.hidden = false;
         running = true;
+        spinDir = 1;
+        updateSpinLabel();
         startRound();
         cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(tick);
